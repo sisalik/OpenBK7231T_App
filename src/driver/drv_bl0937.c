@@ -24,7 +24,16 @@
 #define HW_TIMER_ID 0
 
 #elif PLATFORM_BL602
-#include "../../../../../../components/fs/vfs/include/hal/soc/gpio.h"
+#include <bl_irq.h>          //  For bl_irq_register_with_ctx
+#include <bl_gpio.h>         //  For bl_gpio_intmask, bl_set_gpio_intmod
+#include <bl602_glb.h>       //  For GLB_GPIO_Func_Init
+
+static int enable_gpio_interrupt(
+	uint8_t gpioPin,		//  GPIO Pin Number
+	uint8_t intCtrlMod,		//  GPIO Interrupt Control Mode (see below)
+	uint8_t intTrgMod		//  GPIO Interrupt Trigger Mode (see below)
+);
+static void handle_gpio_interrupt(void* arg);
 
 #else
 
@@ -68,10 +77,10 @@ static void HlwCfInterrupt(void* context) {
 }
 
 #elif PLATFORM_BL602
-static void HlwCf1Interrupt(void* context) {
+static void HlwCf1Interrupt() {
 	g_vc_pulses++;
 }
-static void HlwCfInterrupt(void* context) {
+static void HlwCfInterrupt() {
 	g_p_pulses++;
 }
 
@@ -117,12 +126,13 @@ void BL0937_Shutdown_Pins()
 	gpio_int_disable(GPIO_HLW_CF1);
 	gpio_int_disable(GPIO_HLW_CF);
 #elif PLATFORM_BL602
-	gpio_dev_t dev_cf;
-	dev_cf.port = GPIO_HLW_CF;
-	dev_cf.config = GPIO_CONFIG_PULL_UP;
-	hal_gpio_disable_irq(&dev_cf);
-	dev_cf.port = GPIO_HLW_CF1;
-	hal_gpio_disable_irq(&dev_cf);
+	// TODO: Figure out how to disable interrupts on BL602
+	// 	gpio_dev_t dev_cf;
+	// 	dev_cf.port = GPIO_HLW_CF;
+	// 	dev_cf.config = GPIO_CONFIG_PULL_UP;
+	// 	hal_gpio_disable_irq(&dev_cf);
+	// 	dev_cf.port = GPIO_HLW_CF1;
+	// 	hal_gpio_disable_irq(&dev_cf);
 #endif
 }
 
@@ -162,10 +172,11 @@ void BL0937_Init_Pins() {
 #elif PLATFORM_BEKEN
 	gpio_int_enable(GPIO_HLW_CF1, IRQ_TRIGGER_FALLING_EDGE, HlwCf1Interrupt);
 #elif PLATFORM_BL602
-	gpio_dev_t dev_cf1;
-	dev_cf1.port = GPIO_HLW_CF1;
-	dev_cf1.config = GPIO_CONFIG_PULL_UP;
-	hal_gpio_enable_irq(&dev_cf1, IRQ_TRIGGER_FALLING_EDGE, HlwCf1Interrupt, 0);
+	enable_gpio_interrupt(				//  Register GPIO Handler...
+		GPIO_HLW_CF1,					//  GPIO Pin Number
+		GLB_GPIO_INT_CONTROL_ASYNC,		//  Async Control Mode
+		GLB_GPIO_INT_TRIG_NEG_PULSE		//  Trigger when GPIO level shifts from High to Low
+	);
 #endif
 
 	HAL_PIN_Setup_Input_Pullup(GPIO_HLW_CF);
@@ -176,10 +187,23 @@ void BL0937_Init_Pins() {
 #elif PLATFORM_BEKEN
 	gpio_int_enable(GPIO_HLW_CF, IRQ_TRIGGER_FALLING_EDGE, HlwCfInterrupt);
 #elif PLATFORM_BL602
-	gpio_dev_t dev_cf;
-	dev_cf.port = GPIO_HLW_CF;
-	dev_cf.config = GPIO_CONFIG_PULL_UP;
-	hal_gpio_enable_irq(&dev_cf, IRQ_TRIGGER_FALLING_EDGE, HlwCfInterrupt, 0);
+	enable_gpio_interrupt(				//  Register GPIO Handler...
+		GPIO_HLW_CF,					//  GPIO Pin Number
+		GLB_GPIO_INT_CONTROL_ASYNC,		//  Async Control Mode
+		GLB_GPIO_INT_TRIG_NEG_PULSE		//  Trigger when GPIO level shifts from High to Low
+	);
+#endif
+
+#if PLATFORM_BL602
+	//  Register Common Interrupt Handler for GPIO Interrupt
+	bl_irq_register_with_ctx(
+		GPIO_INT0_IRQn,         //  GPIO Interrupt
+		handle_gpio_interrupt,  //  Interrupt Handler
+		NULL                    //  Argument for Interrupt Handler
+	);
+
+	//  Enable GPIO Interrupt
+	bl_irq_enable(GPIO_INT0_IRQn);
 #endif
 
 	g_vc_pulses = 0;
@@ -319,3 +343,69 @@ void BL0937_RunEverySecond(void) {
 #endif
 	BL_ProcessUpdate(final_v, final_c, final_p, NAN, NAN);
 }
+
+#if PLATFORM_BL602
+static int enable_gpio_interrupt(
+	uint8_t gpioPin,		//  GPIO Pin Number
+	uint8_t intCtrlMod,		//  GPIO Interrupt Control Mode (see below)
+	uint8_t intTrgMod		//  GPIO Interrupt Trigger Mode (see below)
+)
+{
+	//  Configure pin as a GPIO Pin
+	GLB_GPIO_Type pins[1];
+	pins[0] = gpioPin;
+	BL_Err_Type rc2 = GLB_GPIO_Func_Init(
+		GPIO_FUN_SWGPIO,  				//  Configure as GPIO
+		pins,             				//  Pins to be configured
+		sizeof(pins) / sizeof(pins[0])	//  Number of pins (1)
+	);
+
+	//  Disable GPIO Interrupt for the pin
+	bl_gpio_intmask(gpioPin, 1);
+
+	//  Configure GPIO Pin for GPIO Interrupt
+	bl_set_gpio_intmod(
+		gpioPin,     //  GPIO Pin Number
+		intCtrlMod,  //  GPIO Interrupt Control Mode (see below)
+		intTrgMod    //  GPIO Interrupt Trigger Mode (see below)
+	);
+
+	//  Enable GPIO Interrupt for the pin
+	bl_gpio_intmask(gpioPin, 0);
+	return 0;
+}
+
+//  GPIO Interrupt Control Modes:
+//  GLB_GPIO_INT_CONTROL_SYNC:  GPIO interrupt sync mode
+//  GLB_GPIO_INT_CONTROL_ASYNC: GPIO interrupt async mode
+//  See hal_button_register_handler_with_dts in https://github.com/lupyuen/bl_iot_sdk/blob/master/components/hal_drv/bl602_hal/hal_button.c
+
+//  GPIO Interrupt Trigger Modes:
+//  GLB_GPIO_INT_TRIG_NEG_PULSE: GPIO negative edge pulse trigger
+//  GLB_GPIO_INT_TRIG_POS_PULSE: GPIO positive edge pulse trigger
+//  GLB_GPIO_INT_TRIG_NEG_LEVEL: GPIO negative edge level trigger (32k 3T)
+//  GLB_GPIO_INT_TRIG_POS_LEVEL: GPIO positive edge level trigger (32k 3T)
+//  See hal_button_register_handler_with_dts in https://github.com/lupyuen/bl_iot_sdk/blob/master/components/hal_drv/bl602_hal/hal_button.c
+
+/// Interrupt Handler for GPIO Pins DIO0 to DIO5. Triggered by SX1276 when LoRa Packet is received
+/// and for other conditions.  Based on gpio_interrupt_entry in
+/// https://github.com/lupyuen/bl_iot_sdk/blob/master/components/hal_drv/bl602_hal/bl_gpio.c#L151-L164
+static void handle_gpio_interrupt(void* arg)
+{
+	GLB_GPIO_Type gpioPin = (GLB_GPIO_Type)GPIO_HLW_CF1;
+	//  Get the Interrupt Status of the GPIO Pin
+	BL_Sts_Type status = GLB_Get_GPIO_IntStatus(gpioPin);
+	//  If the GPIO Pin has triggered an interrupt...
+	if (status == SET) {
+		HlwCf1Interrupt();
+	}
+
+	gpioPin = (GLB_GPIO_Type)GPIO_HLW_CF;
+	//  Get the Interrupt Status of the GPIO Pin
+	status = GLB_Get_GPIO_IntStatus(gpioPin);
+	//  If the GPIO Pin has triggered an interrupt...
+	if (status == SET) {
+		HlwCfInterrupt();
+	}
+}
+#endif
