@@ -174,7 +174,7 @@ void BL0937_Init_Pins() {
 #elif PLATFORM_BL602
 	enable_gpio_interrupt(				//  Register GPIO Handler...
 		GPIO_HLW_CF1,					//  GPIO Pin Number
-		GLB_GPIO_INT_CONTROL_ASYNC,		//  Async Control Mode
+		GLB_GPIO_INT_CONTROL_SYNC,		//  Sync Control Mode
 		GLB_GPIO_INT_TRIG_NEG_PULSE		//  Trigger when GPIO level shifts from High to Low
 	);
 #endif
@@ -189,7 +189,7 @@ void BL0937_Init_Pins() {
 #elif PLATFORM_BL602
 	enable_gpio_interrupt(				//  Register GPIO Handler...
 		GPIO_HLW_CF,					//  GPIO Pin Number
-		GLB_GPIO_INT_CONTROL_ASYNC,		//  Async Control Mode
+		GLB_GPIO_INT_CONTROL_SYNC,		//  Sync Control Mode
 		GLB_GPIO_INT_TRIG_NEG_PULSE		//  Trigger when GPIO level shifts from High to Low
 	);
 #endif
@@ -392,9 +392,11 @@ static int enable_gpio_interrupt(
 /// https://github.com/lupyuen/bl_iot_sdk/blob/master/components/hal_drv/bl602_hal/bl_gpio.c#L151-L164
 static void handle_gpio_interrupt(void* arg)
 {
+	addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER, "GPIO Interrupt");
 	GLB_GPIO_Type gpioPin = (GLB_GPIO_Type)GPIO_HLW_CF1;
 	//  Get the Interrupt Status of the GPIO Pin
 	BL_Sts_Type status = GLB_Get_GPIO_IntStatus(gpioPin);
+	addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER, "GPIO_HLW_CF1 Status %d", status);
 	//  If the GPIO Pin has triggered an interrupt...
 	if (status == SET) {
 		HlwCf1Interrupt();
@@ -403,9 +405,11 @@ static void handle_gpio_interrupt(void* arg)
 	gpioPin = (GLB_GPIO_Type)GPIO_HLW_CF;
 	//  Get the Interrupt Status of the GPIO Pin
 	status = GLB_Get_GPIO_IntStatus(gpioPin);
+	addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER, "GPIO_HLW_CF Status %d", status);
 	//  If the GPIO Pin has triggered an interrupt...
 	if (status == SET) {
 		HlwCfInterrupt();
 	}
+	addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER, "GPIO Interrupt Done");
 }
 #endif
