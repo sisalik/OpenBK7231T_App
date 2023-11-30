@@ -393,6 +393,7 @@ static int enable_gpio_interrupt(
 static void handle_gpio_interrupt(void* arg)
 {
 	addLogAdv(LOG_INFO, LOG_FEATURE_ENERGYMETER, "GPIO Interrupt");
+	return;
 	GLB_GPIO_Type gpioPin = (GLB_GPIO_Type)GPIO_HLW_CF1;
 	//  Get the Interrupt Status of the GPIO Pin
 	BL_Sts_Type status = GLB_Get_GPIO_IntStatus(gpioPin);
